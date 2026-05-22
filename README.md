@@ -15,7 +15,7 @@ This project is aimed at the community of puzzle designers and enthusiasts.
 
 **[Try it live!](https://b10101101.github.io/DOTS-advanced/DOTS___v1.8.7_standalone.html)**
 
-<img width="599" height="384" alt="Fig 01" src="https://github.com/user-attachments/assets/6f963732-c4a7-4553-a63f-a6d513a1db4c" />
+<img width="599" height="384" alt="Fig 01" src="https://github.com/user-attachments/assets/5213f83a-5ab8-4277-9797-1cb6ef4bca8c" />
 
 ---
 
@@ -155,7 +155,7 @@ DOTS³ — это мощный браузерный инструмент для 
 
 **[Попробовать онлайн!](https://b10101101.github.io/DOTS-advanced/DOTS___v1.8.7_standalone.html)**
 
-<img width="599" height="384" alt="Fig 01" src="https://github.com/user-attachments/assets/6f963732-c4a7-4553-a63f-a6d513a1db4c" />
+<img width="599" height="384" alt="Fig 01" src="https://github.com/user-attachments/assets/5213f83a-5ab8-4277-9797-1cb6ef4bca8c" />
 
 ---
 
