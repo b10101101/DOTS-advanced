@@ -1,0 +1,1518 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title id="pageTitle">DOTS</title>
+    <style>
+        body { 
+            margin: 0; 
+            background-color: #ffffff;
+            color: #000000;
+        }
+        .normalpage { margin: 5px; }
+        #canvas { position:fixed; left:0; top:0; width:100%; height:100%; z-index:-1; }
+
+        .row1 { margin: 10px; display: block; }
+        form { width: 100%; }
+
+
+        .control-row {
+            display: flex;
+            align-items: center;
+            margin: 3px 0;
+        }
+        .control-row label {
+            width: 110px;
+            text-align: right;
+            margin-right: 6px;
+            white-space: nowrap;
+        }
+        .control-row span.value {
+            width: 60px;
+            text-align: left;
+            margin-right: 6px;
+            font-family: monospace;
+        }
+        .control-row input[type="range"] {
+            flex: 1 1 auto;
+        }
+
+        .checkrow {
+            display: flex;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+        .checkrow label {
+            margin-right: 8px;
+        }
+        .checkrow span {
+            margin-right: 10px;
+        }
+
+        .circle-block {
+            margin-top: 4px;
+            margin-bottom: 4px;
+            border-top: 1px solid #ccc;
+            padding-top: 3px;
+        }
+
+        kbd {
+          background: #333;
+          padding: 2px 6px;
+          border-radius: 3px;
+          border: 1px solid #555;
+          font-family: monospace;
+          font-size: 10px;
+      }
+
+  </style>
+  <script>
+
+    var APP_VERSION = "1.7.2";
+    var APP_TITLE = "Dynamic Orbit Tracing Simulator - DOTS v" + APP_VERSION;
+
+    var width = 800;
+    var height = 600;
+    var curthink = 1000 * 60;
+    var marg = 10;
+    var canvas, ctx;
+    var overridezoom = 0;
+
+    var useGrayscale = false;
+
+    var distA, distB, distC, distD, angleA, angleB, angleC, angleD
+    var ax, ay, bx, by, cx, cy, dx, dy, sc
+    var uga, ugb, ugc, ugd
+   
+    var deepest = 0;
+    var renderlim = 1000;
+    var pallete = [];
+    var colormul = [154, 230, 214];
+    var eps = 1e-9;
+    var epseps = eps * eps;
+    var san, can, sbn, cbn, scn, ccn, sdn, cdn, pts, ox, oy, ord, p, drawit, mindist, incirc, x, y, ii, state=0;
+    var stopped = true;
+    var stoptime;
+    var setmax;
+    var zoom = 10;
+    var xoff = 0;
+    var yoff = 0;
+    var worldX = 0;  // мировая координата X
+    var worldY = 0;  // мировая координата Y
+    var offsetAx = 0; // смещение центра A от мирового центра по X
+    var offsetAy = 0; // смещение центра A от мирового центра по Y
+
+    var pttype = 2; // режим отображения
+
+    var activeA = true, activeB = true, activeC = true, activeD = true;
+
+    var colorA = '#0077ff', colorB = '#ff3333', colorC = '#00aa00', colorD = '#8800ff';    // Цвета кругов
+
+    var sliders = ["arad", "brad", "crad", "drad", "an", "bn", "cn", "dn", "uga", "ugb", "ugc", "ugd", "distA", "angleA", "distB", "angleB", "distC", "angleC", "distD", "angleD", "zoom"];
+
+    var mouseX = 0, mouseY = 0;
+    var draggingCenter = null; // 'A', 'B', 'C', 'D'
+    var draggingRadius = null; 
+    var lastDraggedCenter = null;
+    var draggingCanvas = false;
+    var dragStartX = 0;
+    var dragStartY = 0;
+    var dragStartXoff = 0;
+    var dragStartYoff = 0;
+    var keysPressed = {};
+    var sliderVisibleState = true;
+    var hotkeysState = 0; // 0 - краткая подсказка, 1 - полная помощь
+    var timelim = 20;
+
+    function getvalue(s) {
+        var r;
+        if (s === "zoom" && overridezoom != 0)
+            r = overridezoom;
+        else
+            r = +document.getElementById(s).value;
+        document.getElementById("show"+s).innerText = r;
+        return r;
+    }
+
+    function getactive(id) {
+        var el = document.getElementById(id);
+        return el && el.checked;
+    }
+
+    function degreesToRadians(degrees) {
+        return degrees * (Math.PI / 180);
+    }
+
+    function roundToDecimalPlaces(num, decimalPlaces) {
+        const factor = Math.pow(10, decimalPlaces);
+        return Math.round(num * factor) / factor;
+    }
+
+    function updateBlocksVisibility() {
+        document.getElementById('blockA').style.display = activeA ? 'block' : 'none';
+        document.getElementById('blockB').style.display = activeB ? 'block' : 'none';
+        document.getElementById('blockC').style.display = activeC ? 'block' : 'none';
+        document.getElementById('blockD').style.display = activeD ? 'block' : 'none';  
+    }
+
+    function updateAnglesInfo() {
+        var parts = [];
+        if (activeA) parts.push(roundToDecimalPlaces((uga/an)%360,3));
+        if (activeB) parts.push(roundToDecimalPlaces((ugb/bn)%360,3));
+        if (activeC) parts.push(roundToDecimalPlaces((ugc/cn)%360,3));
+        if (activeD) parts.push(roundToDecimalPlaces((ugd/dn)%360,3));    
+        document.getElementById("angle").innerText = parts.join(", ") + " angles";
+    }
+
+    function drawcirc(ctx, x, y, r) {
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, 2*Math.PI, false);
+        ctx.stroke();
+    }
+
+    function drawCenterMarker(ctx, x, y, color) {
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(x, y, 8, 0, 2*Math.PI);
+        ctx.fill();
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function changeOrigin(dir) {
+        var delta = 0;
+        if (dir == 37 || dir == 39) {
+            delta = 100;
+            if (dir == 39)
+                delta = - delta;
+                delta /= zoom;
+                xoff += delta;
+        } else {
+            delta = 100;
+            if (dir == 40)
+                delta = - delta;
+                delta /= zoom;
+                yoff += delta;
+        }
+    }
+
+    function dowork() {
+        var start = performance.now();
+        if (start > stoptime) {
+            stopped = true;
+        } else {
+            requestAnimationFrame(dowork);
+        }
+
+        // Мировые координаты центров (в единицах радиуса, без scale)
+        var worldAx = distA * Math.cos(degreesToRadians(angleA));
+        var worldAy = distA * Math.sin(degreesToRadians(angleA));
+
+        var worldBx = distB * Math.cos(degreesToRadians(angleB));
+        var worldBy = distB * Math.sin(degreesToRadians(angleB));
+
+        var worldCx = distC * Math.cos(degreesToRadians(angleC));
+        var worldCy = distC * Math.sin(degreesToRadians(angleC));
+
+        var worldDx = distD * Math.cos(degreesToRadians(angleD));
+        var worldDy = distD * Math.sin(degreesToRadians(angleD));
+
+        while (1) {
+            if (state == 0) {
+                for (var lop = 1; ; lop++) {
+                    if ((lop & 8191) == 0 && performance.now() - start > timelim) {
+                        return;
+                    }
+                    if (pttype == 1) {
+                        var x0 = (width * Math.random());
+                        var y0 = (height * Math.random());
+                        x = (x0 - ax) / sc;
+                        y = (y0 - ay) / sc;
+
+                        var inA = activeA && Math.hypot(x - worldAx, y - worldAy) <= ar;
+                        var inB = activeB && Math.hypot(x - worldBx, y - worldBy) <= br;
+                        var inC = activeC && Math.hypot(x - worldCx, y - worldCy) <= cr;
+                        var inD = activeD && Math.hypot(x - worldDx, y - worldDy) <= dr;
+
+                        if (inA || inB || inC || inD) break;
+
+                    } else if (pttype == 2) {
+                        x = Math.random() * 2 * Math.PI;
+                        var r = Math.random();
+                        var initialized = false;
+
+                        if (r < 0.25 && activeA) {
+                            var ang = x;
+                            x = worldAx + (ar - 2 * eps) * Math.cos(ang);
+                            y = worldAy + (ar - 2 * eps) * Math.sin(ang);
+                            initialized = true;
+                        } else if (r < 0.5 && activeB) {
+                            var ang = x;
+                            x = worldBx + (br - 2 * eps) * Math.cos(ang);
+                            y = worldBy + (br - 2 * eps) * Math.sin(ang);
+                            initialized = true;
+                        } else if (r < 0.75 && activeC) {
+                            var ang = x;
+                            x = worldCx + (cr - 2 * eps) * Math.cos(ang);
+                            y = worldCy + (cr - 2 * eps) * Math.sin(ang);
+                            initialized = true;
+                        } else if (activeD) {
+                            var ang = x;
+                            x = worldDx + (dr - 2 * eps) * Math.cos(ang);
+                            y = worldDy + (dr - 2 * eps) * Math.sin(ang);
+                            initialized = true;
+                        }
+
+                        if (!initialized) {
+                            if (activeA) {
+                                var ang = x;
+                                x = worldAx + (ar - 2 * eps) * Math.cos(ang);
+                                y = worldAy + (ar - 2 * eps) * Math.sin(ang);
+                            } else if (activeB) {
+                                var ang = x;
+                                x = worldBx + (br - 2 * eps) * Math.cos(ang);
+                                y = worldBy + (br - 2 * eps) * Math.sin(ang);
+                            } else if (activeC) {
+                                var ang = x;
+                                x = worldCx + (cr - 2 * eps) * Math.cos(ang);
+                                y = worldCy + (cr - 2 * eps) * Math.sin(ang);
+                            } else if (activeD) {
+                                var ang = x;
+                                x = worldDx + (dr - 2 * eps) * Math.cos(ang);
+                                y = worldDy + (dr - 2 * eps) * Math.sin(ang);
+                            }
+                        }
+
+                        break;
+                    } else {
+                        x = sepAB / 2;
+                        y = 0;
+                        break;
+                    }
+                }
+                pts = [];
+                ox = x;
+                oy = y;
+                ord = 0;
+                p = [];
+                drawit = false;
+                mindist = 1000;
+                incirc = false;
+                state = 1;
+                ii = 0;
+            }
+            if (state == 1) {
+                var sqrt = Math.sqrt;
+                for (; ii < renderlim; ii++) {
+                    if ((ii & 8191) == 0 && performance.now() - start > timelim) {
+                        return;
+                    }
+                    var centerX = xoff / zoom + width / 2;
+                    var centerY = yoff / zoom + height / 2;
+
+                    if (activeA) {
+                        var t = sqrt((x - worldAx) * (x - worldAx) + (y - worldAy) * (y - worldAy)) - ar;
+                        if (t <= 0) {
+                            t = -t;
+                            incirc = true;
+                            var dx = x - worldAx;
+                            var dy = y - worldAy;
+                            var nx = dx * can + dy * san;
+                            var ny = dy * can - dx * san;
+                            x = worldAx + nx;
+                            y = worldAy + ny;
+                        }
+                        if (t < mindist)
+                            mindist = t;
+                    }
+
+                    if (activeB) {
+                        var xb = x - worldBx;
+                        var yb = y - worldBy;
+                        var t2 = sqrt(xb * xb + yb * yb) - br;
+                        if (t2 <= 0) {
+                            t2 = -t2;
+                            incirc = true;
+                            var nx2 = xb * cbn + yb * sbn;
+                            var ny2 = yb * cbn - xb * sbn;
+                            x = worldBx + nx2;
+                            y = worldBy + ny2;
+                        }
+                        if (t2 < mindist)
+                            mindist = t2;
+                    }
+
+                    if (activeC) {
+                        var xc = x - worldCx;
+                        var yc = y - worldCy;
+                        var t3 = sqrt(xc * xc + yc * yc) - cr;
+                        if (t3 <= 0) {
+                            t3 = -t3;
+                            incirc = true;
+                            var rx = xc * ccn + yc * scn;
+                            var ry = yc * ccn - xc * scn;
+                            x = worldCx + rx;
+                            y = worldCy + ry;
+                        }
+                        if (t3 < mindist)
+                            mindist = t3;
+                    }
+
+                    if (activeD) {
+                        var xd = x - worldDx;
+                        var yd = y - worldDy;
+                        var t4 = sqrt(xd * xd + yd * yd) - dr;
+                        if (t4 <= 0) {
+                            t4 = -t4;
+                            incirc = true;
+                            var rx = xd * cdn + yd * sdn;
+                            var ry = yd * cdn - xd * sdn;
+                            x = worldDx + rx;
+                            y = worldDy + ry;
+                        }
+                        if (t4 < mindist)
+                            mindist = t4;
+                    }
+
+                    var xx = (x * sc) + centerX;
+                    var yy = (y * sc) + centerY;
+
+                    if (xx + mindist >= 0 && xx - mindist <= width &&
+                        yy + mindist >= 0 && yy - mindist <= height) {
+                        p.push(xx, yy);
+                    }
+                    ord++;
+                    var dx = x - ox;
+                    if (dx * dx < epseps) {
+                        var dy = y - oy;
+                        if (dx * dx + dy * dy < epseps) {
+                            drawit = true;
+                            break;
+                        }
+                    }
+                }
+                mindist *= sc;
+                if (!drawit) {
+                    if (renderlim < 1000000) {
+                        deepest = renderlim;
+                        document.getElementById("order").innerText = ">" + deepest;
+                        renderlim = Math.floor(renderlim * 1.2);
+                    } else {
+                        if (!setmax) {
+                            deepest = renderlim;
+                            document.getElementById("order").innerText = ">" + deepest;
+                            setmax = true;
+                        }
+                        drawit = true;
+                    }
+                }
+                if (!incirc || !drawit) {
+                    state = 0;
+                } else {
+                    state = 2;
+                    ii = 0;
+                }
+            }
+            if (state == 2) {
+                if (ord > deepest) {
+                    deepest = ord;
+                    document.getElementById('order').innerText = deepest;
+                }
+
+                // Определяем цвет в зависимости от режима точек
+                if (pttype == 2) {
+                    // Режим 2: цвет зависит от того, в какой окружности началась точка
+                    if (useGrayscale) {
+                        ctx.fillStyle = 'rgb(88,88,88)';
+                    } else {
+                        // Определяем исходную окружность по начальной позиции
+                        var startX = ox;
+                        var startY = oy;
+
+                        var distToA = Math.hypot(startX - worldAx, startY - worldAy);
+                        var distToB = Math.hypot(startX - worldBx, startY - worldBy);
+                        var distToC = Math.hypot(startX - worldCx, startY - worldCy);
+                        var distToD = Math.hypot(startX - worldDx, startY - worldDy);
+
+                        // Определяем ближайшую окружность
+                        var minDist = Math.min(
+                            activeA ? Math.abs(distToA - ar) : Infinity,
+                            activeB ? Math.abs(distToB - br) : Infinity,
+                            activeC ? Math.abs(distToC - cr) : Infinity,
+                            activeD ? Math.abs(distToD - dr) : Infinity                            
+                        );
+
+                        if (activeA && Math.abs(distToA - ar) === minDist) {
+                            ctx.fillStyle = colorA; // Синий для A
+                        } else if (activeB && Math.abs(distToB - br) === minDist) {
+                            ctx.fillStyle = colorB; // Красный для B
+                        } else if (activeC && Math.abs(distToC - cr) === minDist) {
+                            ctx.fillStyle = colorC; // Зелёный для C
+                        } else if (activeD && Math.abs(distToD - dr) === minDist) {
+                            ctx.fillStyle = colorD; // Фиолетовый для D
+                        } else {
+                            ctx.fillStyle = colorA; // По умолчанию синий
+                        }
+
+                    }
+                } else {
+                    // Режимы 1 и 3: используем старую палитру
+                    if (useGrayscale) {
+                        ctx.fillStyle = 'rgb(88,88,88)';
+                    } else {
+                        if (!pallete[ord]) {
+                            var crp = ((ord * colormul[0]) % 251);
+                            var cg = ((ord * colormul[1]) % 241);
+                            var cb = ((ord * colormul[2]) % 239);
+                            pallete[ord] = 'rgb(' + crp + ',' + cg + ',' + cb + ')';
+                        }
+                        ctx.fillStyle = pallete[ord];
+                    }
+                }
+
+                if (mindist < 1.5) {
+                    for (; ii < p.length; ii += 2) {
+                        if ((ii & 8191) == 0 && performance.now() - start > timelim) {
+                            return;
+                        }
+                        ctx.fillRect(p[ii], p[ii + 1], 1, 1);
+                    }
+                } else {
+                    for (; ii < p.length; ii += 2) {
+                        if ((ii & 8191) == 0 && performance.now() - start > timelim) {
+                            return;
+                        }
+                        ctx.beginPath();
+                        ctx.arc(p[ii], p[ii + 1], mindist - 0.5, 0, 2 * Math.PI, false);
+                        ctx.fill();
+                    }
+                }
+
+                state = 0;
+
+            }
+        }
+    }
+
+    function doanim() {
+        width = canvas.clientWidth;
+        height = canvas.clientHeight;
+        canvas.width = width;
+        canvas.height = height;
+
+        activeA = getactive("activeA");
+        activeB = getactive("activeB");
+        activeC = getactive("activeC");
+        activeD = getactive("activeD");
+
+        updateBlocksVisibility();
+
+        ar = getvalue("arad");
+        br = getvalue("brad");
+        cr = getvalue("crad");
+        dr = getvalue("drad");
+
+        an = getvalue("an");
+        bn = getvalue("bn");
+        cn = getvalue("cn");
+        dn = getvalue("dn");
+
+        uga = getvalue("uga"); // Angle A (spin angle)
+        ugb = getvalue("ugb"); // Angle B (spin angle)
+        ugc = getvalue("ugc"); // Angle C (spin angle)
+        ugd = getvalue("ugd"); // Angle D (spin angle)
+
+        distA = getvalue("distA"); // Distance from world center
+        angleA = getvalue("angleA"); // Angle from world center
+        distB = getvalue("distB");
+        angleB = getvalue("angleB");
+        distC = getvalue("distC");
+        angleC = getvalue("angleC");
+        distD = getvalue("distD");
+        angleD = getvalue("angleD");
+
+        zoom = getvalue("zoom");
+
+        // Вычисляем максимальный размер для масштабирования
+        var maxDist = Math.max(distA + ar, distB + br, distC + cr, distD + dr);
+        var h = maxDist * 2 + 2;
+        var w = maxDist * 2 + 2;
+
+        sc = Math.min((height / zoom - 2 * marg) / h, (width / zoom - 2 * marg) / w);
+
+        // Центр экрана с учетом offset камеры
+        var centerX = xoff / zoom + width / 2;
+        var centerY = yoff / zoom + height / 2;
+
+        // Мировые координаты центров (в единицах радиуса)
+        var worldAx = distA * Math.cos(degreesToRadians(angleA));
+        var worldAy = distA * Math.sin(degreesToRadians(angleA));
+
+        var worldBx = distB * Math.cos(degreesToRadians(angleB));
+        var worldBy = distB * Math.sin(degreesToRadians(angleB));
+
+        var worldCx = distC * Math.cos(degreesToRadians(angleC));
+        var worldCy = distC * Math.sin(degreesToRadians(angleC));
+
+        var worldDx = distD * Math.cos(degreesToRadians(angleD));
+        var worldDy = distD * Math.sin(degreesToRadians(angleD));
+
+        // Экранные координаты
+        ax = centerX + worldAx * sc;
+        ay = centerY + worldAy * sc;
+        ax = Math.floor(ax + 0.5);
+        ay = Math.floor(ay + 0.5);
+
+        bx = centerX + worldBx * sc;
+        by = centerY + worldBy * sc;
+        bx = Math.floor(bx + 0.5);
+        by = Math.floor(by + 0.5);
+
+        cx = centerX + worldCx * sc;
+        cy = centerY + worldCy * sc;
+        cx = Math.floor(cx + 0.5);
+        cy = Math.floor(cy + 0.5);
+
+        dx = centerX + worldDx * sc;
+        dy = centerY + worldDy * sc;
+        dx = Math.floor(dx + 0.5);
+        dy = Math.floor(dy + 0.5);
+
+        // вращения A, B, C: угол / spin
+        san = Math.sin(degreesToRadians(uga) / an);
+        can = Math.cos(degreesToRadians(uga) / an);
+        sbn = Math.sin(degreesToRadians(ugb) / bn);
+        cbn = Math.cos(degreesToRadians(ugb) / bn);
+        scn = Math.sin(degreesToRadians(ugc) / cn);
+        ccn = Math.cos(degreesToRadians(ugc) / cn);
+        sdn = Math.sin(degreesToRadians(ugd) / dn);
+        cdn = Math.cos(degreesToRadians(ugd) / dn);
+
+        updateAnglesInfo();
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Рисуем перекрестие в точке (0, 0) мировых координат
+        var world0x = centerX; // Экранная координата мирового центра X
+        var world0y = centerY; // Экранная координата мирового центра Y
+
+        ctx.save();
+        ctx.strokeStyle = "rgba(150, 150, 150, 0.3)"; // Светло-серый полупрозрачный
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 5]); // Пунктирная линия
+
+        // Вертикальная линия
+        ctx.beginPath();
+        ctx.moveTo(world0x, 0);
+        ctx.lineTo(world0x, canvas.height);
+        ctx.stroke();
+
+        // Горизонтальная линия
+        ctx.beginPath();
+        ctx.moveTo(0, world0y);
+        ctx.lineTo(canvas.width, world0y);
+        ctx.stroke();
+
+        // Рисуем точку в центре
+        ctx.setLineDash([]); // Убираем пунктир
+        ctx.fillStyle = "rgba(150, 150, 150, 0.5)";
+        ctx.beginPath();
+        ctx.arc(world0x, world0y, 4, 0, 2 * Math.PI);
+        ctx.fill();
+
+        ctx.restore();
+
+        if (activeA) { 
+            // Маркер центра A 
+            ctx.strokeStyle = colorA; // синий
+            drawcirc(ctx, ax, ay, ar * sc);
+            drawCenterMarker(ctx, ax, ay, colorA);
+            // Маркер радиуса A
+            const angleA = 10;
+            const radA = angleA * Math.PI / 180;
+            const markerAx = ax + ar * sc * Math.cos(radA);
+            const markerAy = ay + ar * sc * Math.sin(radA);
+            ctx.save();
+            ctx.fillStyle = colorA; // синий
+            ctx.strokeStyle = colorA;
+            ctx.lineWidth = 2;
+            ctx.fillRect(markerAx - 5, markerAy - 5, 10, 10);
+            ctx.strokeRect(markerAx - 5, markerAy - 5, 10, 10);
+            ctx.restore();
+        }
+
+        if (activeB) {
+            // Маркер центра B
+            ctx.strokeStyle = colorB; // красный
+            drawcirc(ctx, bx, by, br * sc);
+            drawCenterMarker(ctx, bx, by, colorB);
+            // Маркер радиуса B
+            const angleB = 30;
+            const radB = angleB * Math.PI / 180;
+            const markerBx = bx + br * sc * Math.cos(radB);
+            const markerBy = by + br * sc * Math.sin(radB);
+            ctx.save();
+            ctx.fillStyle = colorB; // красный
+            ctx.strokeStyle = colorB;
+            ctx.lineWidth = 2;
+            ctx.fillRect(markerBx - 5, markerBy - 5, 10, 10);
+            ctx.strokeRect(markerBx - 5, markerBy - 5, 10, 10);
+            ctx.restore();
+        }
+
+        if (activeC) {
+            // Маркер центра C
+            ctx.strokeStyle = colorC; // зелёный
+            drawcirc(ctx, cx, cy, cr * sc);
+            drawCenterMarker(ctx, cx, cy, colorC);
+            // Маркер радиуса C
+            const angleC = 50;
+            const radC = angleC * Math.PI / 180;
+            const markerCx = cx + cr * sc * Math.cos(radC);
+            const markerCy = cy + cr * sc * Math.sin(radC);
+            ctx.save();
+            ctx.fillStyle = colorC; // зелёный
+            ctx.strokeStyle = colorC;
+            ctx.lineWidth = 2;
+            ctx.fillRect(markerCx - 5, markerCy - 5, 10, 10);
+            ctx.strokeRect(markerCx - 5, markerCy - 5, 10, 10);
+            ctx.restore();
+        }
+
+        if (activeD) {
+            // Маркер центра D
+            ctx.strokeStyle = "#8800ff";
+            drawcirc(ctx, dx, dy, dr * sc);
+            drawCenterMarker(ctx, dx, dy, "#8800ff");
+            // Маркер радиуса D            
+            const angleD = 70 * Math.PI / 180;
+            const markerDx = dx + dr * sc * Math.cos(angleD);
+            const markerDy = dy + dr * sc * Math.sin(angleD);
+            ctx.save();
+            ctx.fillStyle = "#8800ff";
+            ctx.strokeStyle = "#8800ff";
+            ctx.lineWidth = 2;
+            ctx.fillRect(markerDx - 5, markerDy - 5, 10, 10);
+            ctx.strokeRect(markerDx - 5, markerDy - 5, 10, 10);
+            ctx.restore();
+        }
+
+        // Запускаем трассировку
+        deepest = 0;
+        renderlim = 1000;
+        curthink = 10000 / 60;
+        state = 0;
+        setmax = false;
+        stoptime = performance.now() + curthink;
+
+        updateInfoText();
+
+        if (stopped) {
+            stopped = false;
+            requestAnimationFrame(dowork);
+            return;
+        }
+    }
+
+    function getNearestCenter(mx, my) {
+        const tol = 12;
+        let candidates = [];
+
+        if (activeA && Math.hypot(mx - ax, my - ay) < tol) {
+            candidates.push('A');
+        }
+        if (activeB && Math.hypot(mx - bx, my - by) < tol) {
+            candidates.push('B');
+        }
+        if (activeC && Math.hypot(mx - cx, my - cy) < tol) {
+            candidates.push('C');
+        }
+        if (activeD && Math.hypot(mx - dx, my - dy) < tol) {
+            candidates.push('D');
+        }
+        if (candidates.length === 0) return null;
+
+        if (candidates.length > 1) {
+            // Если несколько кругов в одной точке — переключаем циклически
+            const currentIdx = candidates.indexOf(lastDraggedCenter);
+            const nextIdx = (currentIdx + 1) % candidates.length;
+            lastDraggedCenter = candidates[nextIdx];
+            return lastDraggedCenter;
+        }
+
+        lastDraggedCenter = candidates[0];
+        return candidates[0];
+    }
+
+    function getNearestRadiusMarker(mx, my) {
+        const tol = 12; // толерантность в пикселях
+        let candidates = [];
+
+        if (activeA) {
+            const angleA = 10;
+            const radA = angleA * Math.PI / 180;
+            const markerAx = ax + ar * sc * Math.cos(radA);
+            const markerAy = ay + ar * sc * Math.sin(radA);
+            if (Math.hypot(mx - markerAx, my - markerAy) < tol) {
+                candidates.push('A');
+            }
+        }
+
+        if (activeB) {
+            const angleB = 30;
+            const radB = angleB * Math.PI / 180;
+            const markerBx = bx + br * sc * Math.cos(radB);
+            const markerBy = by + br * sc * Math.sin(radB);
+            if (Math.hypot(mx - markerBx, my - markerBy) < tol) {
+                candidates.push('B');
+            }
+        }
+
+        if (activeC) {
+            const angleC = 50;
+            const radC = angleC * Math.PI / 180;
+            const markerCx = cx + cr * sc * Math.cos(radC);
+            const markerCy = cy + cr * sc * Math.sin(radC);
+            if (Math.hypot(mx - markerCx, my - markerCy) < tol) {
+                candidates.push('C');
+            }
+        }
+
+        if (activeD) {
+            const angleD = 70;
+            const radD = angleD * Math.PI / 180;
+            const markerDx = dx + dr * sc * Math.cos(radD);
+            const markerDy = dy + dr * sc * Math.sin(radD);
+            if (Math.hypot(mx - markerDx, my - markerDy) < tol) {
+                candidates.push('D');
+            }
+        }
+
+        if (candidates.length === 0) return null;
+        return candidates[0];
+    }    
+
+
+    function updateCenterFromMouse(center) {
+        const canvasX = mouseX;
+        const canvasY = mouseY;
+        
+        var centerX = xoff / zoom + width / 2;
+        var centerY = yoff / zoom + height / 2;
+        
+        // Мировые координаты курсора
+        const worldMouseX = (canvasX - centerX) / sc;
+        const worldMouseY = (canvasY - centerY) / sc;
+        
+        const dist = Math.hypot(worldMouseX, worldMouseY);
+        const angle = (Math.atan2(worldMouseY, worldMouseX) * 180 / Math.PI + 360) % 360;
+        
+        if (center === 'A') {
+            document.getElementById("distA").value = Math.max(0, Math.min(10, dist));
+            document.getElementById("angleA").value = angle;
+        } else if (center === 'B') {
+            document.getElementById("distB").value = Math.max(0, Math.min(10, dist));
+            document.getElementById("angleB").value = angle;
+        } else if (center === 'C') {
+            document.getElementById("distC").value = Math.max(0, Math.min(10, dist));
+            document.getElementById("angleC").value = angle;
+        } else if (center === 'D') {
+            document.getElementById("distD").value = Math.max(0, Math.min(10, dist));
+            document.getElementById("angleD").value = angle;
+        }
+    }
+
+    function updateRadiusFromMouse(circle) {
+        const canvasX = mouseX;
+        const canvasY = mouseY;
+
+        if (circle === 'A') {
+            const dx_pix = canvasX - ax;
+            const dy_pix = canvasY - ay;
+            const newRadius = Math.hypot(dx_pix, dy_pix) / sc;
+            document.getElementById('arad').value = Math.max(0, Math.min(10, newRadius));
+        } else if (circle === 'B') {
+            const dx_pix = canvasX - bx;
+            const dy_pix = canvasY - by;
+            const newRadius = Math.hypot(dx_pix, dy_pix) / sc;
+            document.getElementById('brad').value = Math.max(0, Math.min(10, newRadius));
+        } else if (circle === 'C') {
+            const dx_pix = canvasX - cx;
+            const dy_pix = canvasY - cy;
+            const newRadius = Math.hypot(dx_pix, dy_pix) / sc;
+            document.getElementById('crad').value = Math.max(0, Math.min(10, newRadius));
+        } else if (circle === 'D') {
+            const dx_pix = canvasX - dx;
+            const dy_pix = canvasY - dy;
+            const newRadius = Math.hypot(dx_pix, dy_pix) / sc;
+            document.getElementById('drad').value = Math.max(0, Math.min(10, newRadius));
+        }
+    }
+
+    function keypress(e) {
+        // e = e || window.event;
+        // var code = e.code;
+
+        // if  (e.keyCode >= 37 && e.keyCode <= 40) {
+        //     changeOrigin(e.keyCode);
+        //     doanim();
+        // } else if (code === "KeyD") {
+        //     pttype = (pttype % 3) + 1;
+        //     doanim();
+        // } else if (code === "KeyP") {
+        //     if (!useGrayscale) {
+        //         recolor();
+        //         doanim();
+        //     }
+        // } else if (code === "KeyH") {
+        //     hotkeysState = (hotkeysState + 1) % 2;
+        //     document.getElementById("hotkeysShort").style.display = hotkeysState === 0 ? "block" : "none";
+        //     document.getElementById("hotkeysFull").style.display = hotkeysState === 1 ? "block" : "none";
+        // }
+    }
+
+    function onKeyDown(e) {
+        e = e || window.event;
+        if (e.code === 'KeyA' && !keysPressed['KeyA']) {
+            togglevis();
+        } else if (e.key === '1') { // Переключение кругов клавишами 1, 2, 3, 4
+            e.preventDefault();
+            const checkbox = document.getElementById('activeA');
+            checkbox.checked = !checkbox.checked;
+            doanim();
+        } else if (e.key === '2') {
+            e.preventDefault();
+            const checkbox = document.getElementById('activeB');
+            checkbox.checked = !checkbox.checked;
+            doanim();
+        } else if (e.key === '3') {
+            e.preventDefault();
+            const checkbox = document.getElementById('activeC');
+            checkbox.checked = !checkbox.checked;
+            doanim();
+        } else if (e.key === '4') {
+            e.preventDefault();
+            const checkbox = document.getElementById('activeD');
+            checkbox.checked = !checkbox.checked;
+            doanim();
+        } else if (e.code === "KeyW") { // переключение оежима цвет / Ч-Б
+            useGrayscale = !useGrayscale;
+            pallete = [];
+            console.log("Grayscale toggled:", useGrayscale);
+            doanim();
+        } else if (e.code === "KeyS") { // сделать скриншот
+            takeScreenshot();
+        } else if (e.code === "Digit0") { // сбросить масштаб
+            zoom = 1;
+            overridezoom = 0;
+            document.getElementById("zoom").value = zoom;
+            xoff = 0;
+            yoff = 0;
+            doanim();
+        } else if (e.code === "BracketLeft") { // уменьшить масштаб
+            var z = getvalue("zoom");
+            z = z / 1.1;
+            z = Math.floor(z * 1000) / 1000;
+            if (z < 0.5 || z > 10) {
+                overridezoom = z;
+            } else {
+                overridezoom = 0;
+                document.getElementById("zoom").value = z;
+            }
+            doanim();
+        } else if (e.code === "BracketRight") { // увеличить масштаб
+            var z = getvalue("zoom");
+            z = z * 1.1;
+            z = Math.floor(z * 1000) / 1000;
+            if (z < 0.5 || z > 10) {
+                overridezoom = z;
+            } else {
+                overridezoom = 0;
+                document.getElementById("zoom").value = z;
+            }
+            doanim();
+        } else if (e.keyCode >= 37 && e.keyCode <= 40) { // перемещение картинкаи стрелками
+            changeOrigin(e.keyCode);
+            doanim();
+        } else if (e.code === "KeyD") { // переключение режимов отображения
+            pttype = (pttype % 3) + 1;
+            doanim();
+        } else if (e.code === "KeyP" && !useGrayscale && pttype == 1) { // смена палитры
+            recolor();
+            doanim();
+        } else if (e.code === "KeyH") { // показ-скрытие подсказки
+            hotkeysState = (hotkeysState + 1) % 2;
+            document.getElementById("hotkeysShort").style.display = hotkeysState === 0 ? "block" : "none";
+            document.getElementById("hotkeysFull").style.display = hotkeysState === 1 ? "block" : "none";
+        }
+
+        // console.log("pttype:", pttype);
+
+        keysPressed[e.code] = true;
+    }
+
+    function onKeyUp(e) {
+        keysPressed[e.code] = false;
+    }
+
+    function onMouseMove(e) {
+        const rect = canvas.getBoundingClientRect();
+        mouseX = e.clientX - rect.left;
+        mouseY = e.clientY - rect.top;
+
+            // Проверяем приоритет: маркеры радиуса, потом центры
+        if (sliderVisibleState === false && (getNearestRadiusMarker(mouseX, mouseY) !== null || getNearestCenter(mouseX, mouseY) !== null)) {
+            // document.getElementById('row1').style.display = 'none';
+            canvas.style.cursor = 'grab';
+        } else {
+            canvas.style.cursor = 'default';
+        }
+
+        if (draggingRadius) {
+            updateRadiusFromMouse(draggingRadius);
+            doanim();
+        } else if (draggingCenter) {
+            updateCenterFromMouse(draggingCenter);
+            doanim();
+        } else if (draggingCanvas) { // двигаем сам canvas ?
+            const dx = (e.clientX - dragStartX);
+            const dy = (e.clientY - dragStartY);
+            xoff = dragStartXoff + dx / zoom;
+            yoff = dragStartYoff + dy / zoom;
+            doanim();
+            return;
+        }
+    }
+
+    function onMouseDown(e) {
+        const rect = canvas.getBoundingClientRect();
+        mouseX = e.clientX - rect.left;
+        mouseY = e.clientY - rect.top;
+
+        // Приоритет: сначала маркеры радиуса
+        if (sliderVisibleState === false) {
+            const radiusMarker = getNearestRadiusMarker(mouseX, mouseY);
+            if (radiusMarker !== null) {
+                document.getElementById('row1').style.display = 'none';
+                draggingRadius = radiusMarker;
+                return;
+            }
+        }
+
+        // Потом центры
+        if (sliderVisibleState === false) {
+            const centerMarker = getNearestCenter(mouseX, mouseY);
+            if (centerMarker !== null) {
+                document.getElementById('row1').style.display = 'none';
+                draggingCenter = centerMarker;
+            }
+        }
+
+        // Если не захватили маркер - начинаем двигать canvas (только если слайдеры скрыты)
+        if (sliderVisibleState === false) {
+            draggingCanvas = true;
+            dragStartX = e.clientX;
+            dragStartY = e.clientY;
+            dragStartXoff = xoff;
+            dragStartYoff = yoff;
+            canvas.style.cursor = 'grabbing';
+        }
+    }
+
+    function onMouseUp(e) {
+        draggingCenter = null;
+        draggingRadius = null;
+        draggingCanvas = false;
+        lastDraggedCenter = null;
+        canvas.style.cursor = 'default';
+    }
+
+    function onMouseWheel(e) {
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+
+        // Проверяем, находится ли курсор над маркером радиуса
+        const marker = getNearestRadiusMarker(mx, my);
+
+        if (marker !== null) {
+            e.preventDefault(); // Останавливаем прокрутку страницы
+
+            // Определяем направление прокрутки
+            const delta = e.deltaY > 0 ? -1 : 1;
+
+            if (e.shiftKey) {
+                // Shift + колесико → изменяем Angle
+                if (marker === 'A') {
+                    const currentAngle = parseFloat(document.getElementById('uga').value);
+                    const newAngle = currentAngle + delta * 360;
+                    document.getElementById('uga').value = newAngle;
+                    document.getElementById('showuga').innerText = newAngle;
+                } else if (marker === 'B') {
+                    const currentAngle = parseFloat(document.getElementById('ugb').value);
+                    const newAngle = currentAngle + delta * 360;
+                    document.getElementById('ugb').value = newAngle;
+                    document.getElementById('showugb').innerText = newAngle;
+                } else if (marker === 'C') {
+                    const currentAngle = parseFloat(document.getElementById('ugc').value);
+                    const newAngle = currentAngle + delta * 360;
+                    document.getElementById('ugc').value = newAngle;
+                    document.getElementById('showugc').innerText = newAngle;
+                } else if (marker === 'D') {
+                    const currentAngle = parseFloat(document.getElementById('ugd').value);
+                    const newAngle = currentAngle + delta * 360;
+                    document.getElementById('ugd').value = newAngle;
+                    document.getElementById('showugd').innerText = newAngle;
+                }
+            } else {
+                // Просто колесико → изменяем Spin
+                if (marker === 'A') {
+                    const currentSpin = parseInt(document.getElementById('an').value);
+                    const newSpin = Math.max(2, Math.min(20, currentSpin + delta));
+                    document.getElementById('an').value = newSpin;
+                    document.getElementById('showan').innerText = newSpin;
+                } else if (marker === 'B') {
+                    const currentSpin = parseInt(document.getElementById('bn').value);
+                    const newSpin = Math.max(2, Math.min(20, currentSpin + delta));
+                    document.getElementById('bn').value = newSpin;
+                    document.getElementById('showbn').innerText = newSpin;
+                } else if (marker === 'C') {
+                    const currentSpin = parseInt(document.getElementById('cn').value);
+                    const newSpin = Math.max(2, Math.min(20, currentSpin + delta));
+                    document.getElementById('cn').value = newSpin;
+                    document.getElementById('showcn').innerText = newSpin;
+                } else if (marker === 'D') {
+                    const currentSpin = parseInt(document.getElementById('dn').value);
+                    const newSpin = Math.max(2, Math.min(20, currentSpin + delta));
+                    document.getElementById('dn').value = newSpin;
+                    document.getElementById('showdn').innerText = newSpin;
+                }
+            }
+
+            doanim();
+        } else if (!sliderVisibleState) {
+            // Курсор НЕ на маркере → делаем ZOOM колесиком
+            e.preventDefault();
+
+            var z = getvalue("zoom");
+
+            // deltaY < 0 означает прокрутку вверх (увеличение zoom)
+            // deltaY > 0 означает прокрутку вниз (уменьшение zoom)
+            if (e.deltaY < 0) {
+                z = z * 1.1; // увеличить как BracketRight
+            } else {
+                z = z / 1.1; // уменьшить как BracketLeft
+            }
+
+            z = Math.floor(z * 1000) / 1000;
+
+            if (z < 0.5 || z > 10) {
+                overridezoom = z;
+            } else {
+                overridezoom = 0;
+                document.getElementById("zoom").value = z;
+            }
+
+            doanim();
+        }
+    }
+
+    function updateInfoText() {
+        var html = '';
+
+        if (activeA) {
+            html += '<div style="background: rgba(0,0,0,0.85); color: white; padding: 10px 15px; border-radius: 6px; font-family: monospace; font-size: 12px; line-height: 1.5; border: 2px solid #0077ff; box-sizing: border-box; display: flex; flex-direction: column; flex: 1;">';
+            html += '<div style="color: #0077ff; font-weight: bold; margin-bottom: 5px;">● Circle A</div>';
+            html += 'Radius: ' + ar.toFixed(3) + '<br>';
+            html += 'Angle: ' + uga + '°<br>';
+            html += `Spin: ${an}<br>`;
+            html += `Dist from World: ${distA.toFixed(3)}<br>`;
+            html += `Pos angle: ${angleA.toFixed(1)}` + '°';
+            html += '</div>';
+        }
+
+        if (activeB) {
+            html += `<div style="background: rgba(0,0,0,0.85); color: white; padding: 10px 15px; border-radius: 6px; font-family: monospace; font-size: 12px; line-height: 1.5; border: 2px solid #ff3333; box-sizing: border-box; display: flex; flex-direction: column; flex: 1;">`;
+            html += `<div style="color: #ff3333; font-weight: bold; margin-bottom: 5px;">Circle B</div>`;
+            html += `Radius: ${br.toFixed(3)}<br>`;
+            html += `Angle: ${ugb}<br>`;
+            html += `Spin: ${bn}<br>`;
+            html += `Dist from World: ${distB.toFixed(3)}<br>`;
+            html += `Pos angle: ${angleB.toFixed(1)}` + '°';
+            html += `</div>`;
+        }
+
+        if (activeC) {
+            html += '<div style="background: rgba(0,0,0,0.85); color: white; padding: 10px 15px; border-radius: 6px; font-family: monospace; font-size: 12px; line-height: 1.5; border: 2px solid #00aa00; box-sizing: border-box; display: flex; flex-direction: column; flex: 1;">';
+            html += '<div style="color: #00aa00; font-weight: bold; margin-bottom: 5px;">● Circle C</div>';
+            html += 'Radius: ' + cr.toFixed(3) + '<br>';
+            html += 'Angle: ' + ugc + '°<br>';
+            html += 'Spin: ' + cn + '<br>';
+            html += `Dist from World: ${distC.toFixed(3)}<br>`;
+            html += `Pos angle: ${angleC.toFixed(1)}` + '°';
+            html += '</div>';
+        }
+
+        if (activeD) {
+            html += '<div style="background: rgba(0,0,0,0.85); color: white; padding: 10px 15px; border-radius: 6px; font-family: monospace; font-size: 12px; line-height: 1.5; border: 2px solid #A565DC; box-sizing: border-box; display: flex; flex-direction: column; flex: 1;">';
+            html += '<div style="color: #A565DC; font-weight: bold; margin-bottom: 5px;">● Circle D</div>';
+            html += 'Radius: ' + dr.toFixed(3) + '<br>';
+            html += 'Angle: ' + ugd + '°<br>';
+            html += 'Spin: ' + dn + '<br>';
+            html += `Dist from World: ${distD.toFixed(3)}<br>`;
+            html += `Pos angle: ${angleD.toFixed(1)}` + '°';
+            html += '</div>';
+        }
+
+        document.getElementById('infoText').innerHTML = html;
+    }
+
+    function dorandom() {
+    }
+
+    function recolor() {
+        for (var i=0; i<3; i++) {
+            colormul[i] = Math.floor(10 + 228 * Math.random());
+        }
+        pallete = [];
+    }
+
+    function togglevis() {
+        var s = document.getElementById('row1').style;
+        if (!s.display || s.display == 'block') {
+            s.display = 'none';
+            document.getElementById('toggleui').innerText = 'Show Sliders';
+            sliderVisibleState = false;
+        } else {
+            s.display = 'block';
+            document.getElementById('toggleui').innerText = 'Hide Sliders';
+            sliderVisibleState = true;
+        }
+    }
+
+    function petals(angle, spin) {
+        return spin ? Math.round(100 * angle / spin) / 100 : angle;
+    }
+
+    function takeScreenshot() {
+        var tempCanvas = document.createElement('canvas');
+        tempCanvas.width = canvas.width;
+        tempCanvas.height = canvas.height;
+        var tempCtx = tempCanvas.getContext('2d');
+        tempCtx.fillStyle = '#FFFFFF';
+        tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+        tempCtx.drawImage(canvas, 0, 0);
+
+        var lines = [];
+        lines.push('Radius: A ' + ar.toFixed(3) + ', B ' + br.toFixed(3) + ', C ' + cr.toFixed(3) + ', D ' + dr.toFixed(3));
+        lines.push('Angle: A ' + uga + ', B ' + ugb + ', B pos: ' + ugbpos + ', C ' + ugc + ', C pos: ' + ugcpos + ', D ' + ugd + ', D pos: ' + ugdpos);
+        lines.push('Spin: A ' + an + ', B ' + bn + ', C ' + cn + ', D ' + dn);
+        lines.push('Dist: AB ' + sepAB + ', AC ' + sepAC + ', AD ' + sepAD + ', Zoom ' + zoom);
+
+        tempCtx.fillStyle = '#000000';
+        tempCtx.font = '14px monospace';
+        tempCtx.textBaseline = 'top';
+        var margin = 10;
+        var lineHeight = 18;
+        for (var i = 0; i < lines.length; i++) {
+            tempCtx.fillText(lines[i], margin, margin + i * lineHeight);
+        }
+
+        var now = new Date();
+        var year = now.getFullYear();
+        var month = String(now.getMonth() + 1).padStart(2, '0');
+        var day = String(now.getDate()).padStart(2, '0');
+        var hours = String(now.getHours()).padStart(2, '0');
+        var minutes = String(now.getMinutes()).padStart(2, '0');
+
+        var circleCount = (activeA ? 1 : 0) + (activeB ? 1 : 0) + (activeC ? 1 : 0);
+
+        var AA = activeA ? petals(uga, an) : 0;
+        var BB = activeB ? petals(ugb, bn) : 0;
+        var CC = activeC ? petals(ugc, cn) : 0;
+        var DD = activeD ? petals(ugd, dn) : 0;
+
+        var filename = year + '-' + month + '-' + day + '_' + hours + ':' + minutes + '_' + circleCount + 'circles_' + AA + 'x' + BB + 'x' + CC + 'x' + DD + '.jpg';
+
+        var link = document.createElement('a');
+        link.href = tempCanvas.toDataURL('image/jpeg', 0.95);
+        link.download = filename;
+        link.click();
+    }
+
+    function ignore(e) {
+        e = e || window.event;
+        e.stopPropagation();
+    }
+
+    function start() {
+        canvas = document.getElementById("canvas");
+        ctx = canvas.getContext("2d");
+        canvas.tabIndex = 0;
+        canvas.focus();
+        canvas.style.outline = 'none';
+
+        document.getElementById("pageTitle").textContent = APP_TITLE; // Устанавливаем заголовок страницы
+        document.getElementById("appTitle").textContent = APP_TITLE; // Устанавливаем заголовок в интерфейсе
+
+        for (var s of sliders) {
+            document.getElementById(s).oninput = doanim;
+        }
+
+        document.getElementById('toggleui').onclick = function() {
+            togglevis();
+            sliderVisibleState = document.getElementById('row1').style.display !== 'none';
+        };
+        document.getElementById('resetbtn').onclick = function() {
+            document.getElementById('activeA').checked = true;
+            document.getElementById('activeB').checked = true;
+            document.getElementById('activeC').checked = true;
+            document.getElementById('activeD').checked = true;
+
+            document.getElementById('arad').value = 1.3;
+            document.getElementById('brad').value = 0.89;
+            document.getElementById('crad').value = 1.03;
+            document.getElementById('drad').value = 0.49;
+
+            document.getElementById('uga').value = 360;
+            document.getElementById('ugb').value = 360;
+            document.getElementById('ugc').value = 360;
+            document.getElementById('ugd').value = 360;        
+
+            document.getElementById('an').value = 3;
+            document.getElementById('bn').value = 2;
+            document.getElementById('cn').value = 2;
+            document.getElementById('dn').value = 2;
+
+            document.getElementById("distA").value = 0;
+            document.getElementById("angleA").value = 0;
+            document.getElementById("distB").value = 1.63;
+            document.getElementById("angleB").value = 0;
+            document.getElementById("distC").value = 0.94;
+            document.getElementById("angleC").value = 310;
+            document.getElementById("distD").value = 1.35;
+            document.getElementById("angleD").value = 38.8;
+
+            document.getElementById('zoom').value = 1;
+
+            doanim();
+        };
+
+    window.onresize = doanim;
+
+    canvas.addEventListener('mousemove', onMouseMove);        
+    canvas.addEventListener('mousedown', onMouseDown);
+    canvas.addEventListener('mouseup', onMouseUp);
+    canvas.addEventListener('wheel', onMouseWheel);
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('keypress', keypress, false);
+
+    var np = document.getElementById('normalpage');
+    np.addEventListener('keydown', ignore, false);
+    np.addEventListener('keypress', ignore, false);
+
+
+    document.getElementById("activeA").onchange = doanim;
+    document.getElementById("activeB").onchange = doanim;
+    document.getElementById("activeC").onchange = doanim;
+    document.getElementById("activeD").onchange = doanim;
+
+    doanim();
+
+  setTimeout(function() { // Гарантированный фокус после полной загрузки
+    canvas.focus();
+    }, 100);
+    }
+
+window.onload = start;
+
+</script>
+</head>
+
+<body>
+    <canvas id="canvas" width="80" height="80"></canvas>
+
+    <div id="infoText" style="display: flex; position: fixed; bottom: 10px; right: 10px; gap: 3px; z-index: 1000; align-items: stretch;">
+    </div>
+
+    <div id="hotkeysPanel" style="display: block; position: fixed; bottom: 10px; left: 10px; background: rgba(0,0,0,0.85); color: white; padding: 8px 15px; border-radius: 6px; font-family: 'Segoe UI', Arial, sans-serif; font-size: 0.78rem; z-index: 1000; white-space: nowrap; line-height: 1.6;">
+        <div id="hotkeysShort">
+            Press ⌨️ <kbd style="background: #333; padding: 2px 6px; border-radius: 3px; border: 1px solid #555; font-size: 0.78rem;">H</kbd> for help ❓
+        </div>
+        <div id="hotkeysFull" style="display: none;">
+            <div style="margin-bottom: 5px;">
+                <span style="margin-right: 15px;">⌨️ <kbd style="background: #333; padding: 2px 6px; border-radius: 3px; border: 1px solid #555; font-size: 0.78rem;">1</kbd><kbd style="background: #333; padding: 2px 6px; border-radius: 3px; border: 1px solid #555; font-size: 0.78rem;">2</kbd><kbd style="background: #333; padding: 2px 6px; border-radius: 3px; border: 1px solid #555; font-size: 0.78rem;">3</kbd><kbd style="background: #333; padding: 2px 6px; border-radius: 3px; border: 1px solid #555; font-size: 0.78rem;">4</kbd> <span style="font-size: 1.1rem; color: #0077ff;">○</span><span style="font-size: 1.1rem; color: #ff3333;">○</span><span style="font-size: 1.1rem; color: #00aa00;">○</span><span style="font-size: 1.1rem; color: #A565DC;">○</span></span>
+                <span style="margin-right: 15px;">🔍 <kbd style="background: #333; padding: 2px 6px; border-radius: 3px; border: 1px solid #555; font-size: 0.78rem;">[</kbd><kbd style="background: #333; padding: 2px 6px; border-radius: 3px; border: 1px solid #555; font-size: 0.78rem;">0</kbd><kbd style="background: #333; padding: 2px 6px; border-radius: 3px; border: 1px solid #555; font-size: 0.78rem;">]</kbd> Zoom</span>
+                <span style="margin-right: 15px;">∴  <kbd style="background: #333; padding: 2px 6px; border-radius: 3px; border: 1px solid #555; font-size: 0.78rem;">D</kbd> Dots</span>
+                <span style="margin-right: 15px;">🎨 <kbd style="background: #333; padding: 2px 6px; border-radius: 3px; border: 1px solid #555; font-size: 0.78rem;">P</kbd> Palette</span>
+                <span style="margin-right: 15px;">⚫/⚪  <kbd style="background: #333; padding: 2px 6px; border-radius: 3px; border: 1px solid #555; font-size: 0.78rem;">W</kbd> B&W</span>
+            </div>
+            <div>
+                <span style="margin-right: 15px;">📸 <kbd style="background: #333; padding: 2px 6px; border-radius: 3px; border: 1px solid #555; font-size: 0.78rem;">S</kbd> Screenshot</span>
+                <span style="margin-right: 15px;">🎚️🎚️🎚️ <kbd style="background: #333; padding: 2px 6px; border-radius: 3px; border: 1px solid #555; font-size: 0.78rem;">A</kbd> Panel</span>
+                <span style="margin-right: 15px;">🧭 <kbd style="background: #333; padding: 2px 6px; border-radius: 3px; border: 1px solid #555; font-size: 0.78rem;">↑</kbd><kbd style="background: #333; padding: 2px 6px; border-radius: 3px; border: 1px solid #555; font-size: 0.78rem;">↓</kbd><kbd style="background: #333; padding: 2px 6px; border-radius: 3px; border: 1px solid #555; font-size: 0.78rem;">←</kbd><kbd style="background: #333; padding: 2px 6px; border-radius: 3px; border: 1px solid #555; font-size: 0.78rem;">→</kbd> Move</span>            
+                <span>❓ <kbd style="background: #333; padding: 2px 6px; border-radius: 3px; border: 1px solid #555; font-size: 0.78rem;">H</kbd> Hide help</span>
+            </div>
+            <div>
+                <span style="margin-right: 15px;">Move <span style="font-size: 1.1rem; color: #0077ff;">●</span><span style="font-size: 1.1rem; color: #ff3333;">●</span><span style="font-size: 1.1rem; color: #00aa00;">●</span><span style="font-size: 1.1rem; color: #A565DC;">●</span> for change center.</span>
+                <span style="margin-right: 15px;">Move <span style="font-size: 0.94rem; color: #0077ff;">■</span><span style="font-size: 0.94rem; color: #ff3333;">■</span><span style="font-size: 0.94rem; color: #00aa00;">■</span><span style="font-size: 0.94rem; color: #A565DC;">■</span> for change radius.</span>
+            </div>
+            <div>
+                <span style="margin-right: 15px;">🖱️ wheel + <span style="font-size: 0.94rem; color: #0077ff;">■</span><span style="font-size: 0.94rem; color: #ff3333;">■</span><span style="font-size: 0.94rem; color: #00aa00;">■</span><span style="font-size: 0.94rem; color: #A565DC;">■</span> for change spin.</span>
+                <span>🖱️ wheel + <kbd style="background: #333; padding: 2px 6px; border-radius: 3px; border: 1px solid #555; font-size: 0.78rem;">Shift</kbd> + <span style="font-size: 0.94rem; color: #0077ff;">■</span><span style="font-size: 0.94rem; color: #ff3333;">■</span><span style="font-size: 0.94rem; color: #00aa00;">■</span><span style="font-size: 0.94rem; color: #A565DC;">■</span> for change angle.</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="normalpage" class="normalpage">
+        <div class="row1" id="row1">
+            <form>
+                <div class="checkrow">
+                    <label>Circles:&nbsp;</label>
+                    <span><input id="activeA" type="checkbox" checked> A</span>
+                    <span><input id="activeB" type="checkbox" checked> B</span>
+                    <span><input id="activeC" type="checkbox" checked> C</span>
+                    <span><input id="activeD" type="checkbox" checked> D</span>
+                    <span style="flex-grow: 1; text-align: center; background-color: #EDEDED; padding: 5px 15px; margin-left: 20px; border-radius: 4px;">
+                        <strong id="appTitle" style="color: #000000; font-family: Arial, sans-serif; font-size: 15px;"></strong>
+                        <span style="font-size: 8px; text-align: center; opacity: 0.01; color: #6699ff;">    ✶✶✶✶✶    </span>
+                        <strong style="color: #E64B2F; font-family: Arial, sans-serif; font-size: 18px;"> ❄️🎄 NY2026 🎄❄️ </strong>                        
+                    </span>
+                </div>
+
+                <!-- Circle A -->
+                <div id="blockA" class="circle-block">
+                    <div class="control-row">
+                        <label for="arad">Radius A:&nbsp;</label>
+                        <span id="showarad" class="value"></span>
+                        <input id="arad" type="range" step="0.01" min="0" max="10" value="1.3">
+                    </div>
+                    <div class="control-row">
+                        <label for="an">Spin A:&nbsp;</label>
+                        <span id="showan" class="value"></span>
+                        <input id="an" type="range" step="1" min="2" max="20" value="3" style="flex: 0.75 1 auto;">
+                        <label for="uga" style="margin-left: 15px">Angle A:&nbsp;</label>
+                        <span id="showuga" class="value"></span>
+                        <input id="uga" type="range" step="360" min="-360" max="2160" value="360" style="flex: 0.25 1 auto;">
+                    </div>
+                    <div class="control-row">
+                        <label for="distA">Distance A:&nbsp;</label>
+                        <span id="showdistA" class="value"></span>
+                        <input id="distA" type="range" step="0.01" min="0" max="10" value="0">
+                    </div>
+                    <div class="control-row">
+                        <label for="angleA">Angle A pos:&nbsp;</label>
+                        <span id="showangleA" class="value"></span>
+                        <input id="angleA" type="range" step="0.1" min="0" max="360" value="0">
+                    </div>
+                </div>
+
+                <!-- Circle B -->
+                <div id="blockB" class="circle-block">
+                    <div class="control-row">
+                        <label for="brad">Radius B:&nbsp;</label>
+                        <span id="showbrad" class="value"></span>
+                        <input id="brad" type="range" step="0.01" min="0" max="10" value="0.89">
+                    </div>
+                    <div class="control-row">
+                        <label for="bn">Spin B:&nbsp;</label>
+                        <span id="showbn" class="value"></span>
+                        <input id="bn" type="range" step="1" min="2" max="20" value="2" style="flex: 0.75 1 auto;">
+                        <label for="ugb" style="margin-left: 15px">Angle B:&nbsp;</label>
+                        <span id="showugb" class="value"></span>
+                        <input id="ugb" type="range" step="360" min="-360" max="2160" value="360" style="flex: 0.25 1 auto;">
+                    </div>
+                    <div class="control-row">
+                        <label for="distB">Distance B:&nbsp;</label>
+                        <span id="showdistB" class="value"></span>
+                        <input id="distB" type="range" step="0.01" min="0" max="10" value="1.63">
+                    </div>
+                    <div class="control-row">
+                        <label for="angleB">Angle B pos:&nbsp;</label>
+                        <span id="showangleB" class="value"></span>
+                        <input id="angleB" type="range" step="0.1" min="0" max="360" value="0">
+                    </div>
+                </div>
+
+                <!-- Circle C -->
+                <div id="blockC" class="circle-block">
+                    <div class="control-row">
+                        <label for="crad">Radius C:&nbsp;</label>
+                        <span id="showcrad" class="value"></span>
+                        <input id="crad" type="range" step="0.01" min="0" max="10" value="1.03">
+                    </div>
+                    <div class="control-row">
+                        <label for="cn">Spin C:&nbsp;</label>
+                        <span id="showcn" class="value"></span>
+                        <input id="cn" type="range" step="1" min="2" max="20" value="2" style="flex: 0.75 1 auto;">
+                        <label for="ugc" style="margin-left: 15px">Angle C:&nbsp;</label>
+                        <span id="showugc" class="value"></span>
+                        <input id="ugc" type="range" step="360" min="-360" max="2160" value="360" style="flex: 0.25 1 auto;">
+                    </div>
+                    <div class="control-row">
+                        <label for="distC">Distance C:&nbsp;</label>
+                        <span id="showdistC" class="value"></span>
+                        <input id="distC" type="range" step="0.01" min="0" max="10" value="0.94">
+                    </div>
+                    <div class="control-row">
+                        <label for="angleC">Angle C pos:&nbsp;</label>
+                        <span id="showangleC" class="value"></span>
+                        <input id="angleC" type="range" step="0.1" min="0" max="360" value="310">
+                    </div>
+                </div>
+
+                <!-- Circle D -->
+                <div id="blockD" class="circle-block">
+                    <div class="control-row">
+                        <label for="drad">Radius D:&nbsp;</label>
+                        <span id="showdrad" class="value"></span>
+                        <input id="drad" type="range" step="0.01" min="0" max="10" value="0.49">
+                    </div>
+                    <div class="control-row">
+                        <label for="dn">Spin D:&nbsp;</label>
+                        <span id="showdn" class="value"></span>
+                        <input id="dn" type="range" step="1" min="2" max="20" value="2" style="flex: 0.75 1 auto;">
+                        <label for="ugd" style="margin-left: 15px">Angle D:&nbsp;</label>
+                        <span id="showugd" class="value"></span>
+                        <input id="ugd" type="range" step="360" min="-360" max="2160" value="360" style="flex: 0.25 1 auto;">
+                    </div>
+                    <div class="control-row">
+                        <label for="distD">Distance D:&nbsp;</label>
+                        <span id="showdistD" class="value"></span>
+                        <input id="distD" type="range" step="0.01" min="0" max="10" value="1.35">
+                    </div>
+                    <div class="control-row">
+                        <label for="angleD">Angle D pos:&nbsp;</label>
+                        <span id="showangleD" class="value"></span>
+                        <input id="angleD" type="range" step="0.1" min="0" max="360" value="38.8">
+                    </div>
+                </div>
+
+                <!-- Zoom control -->
+                <div class="circle-block">
+                    <div class="control-row">
+                        <label for="zoom">Zoom:&nbsp;</label>
+                        <span id="showzoom" class="value"></span>
+                        <input id="zoom" min="0.5" step="0.1" max="10" type="range" value="1">
+                    </div>
+                </div>
+
+
+                <p><span id="order"></span> order</p>
+                <p><span id="angle"></span></p>
+            </form>
+
+        </div>
+        <div>
+            <button type="button" id="toggleui">Hide Sliders</button>
+            <button type="button" id="resetbtn">Reset</button>
+        </div>
+    </div>
+</body>
+</html>
